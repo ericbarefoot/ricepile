@@ -7,7 +7,7 @@ import os
 
 class Feeder(object):
 
-	def __init__(self, rps=None, ppr=800, PUL=17, DIR=27, ENA=22):
+	def __init__(self, feed_rate=None, calib_file=None, rps=None, ppr=800, PUL=17, DIR=27, ENA=22):
 
         self.PUL = PUL
         self.DIR = DIR
@@ -31,6 +31,15 @@ class Feeder(object):
         self.rps = rps
         self.ppr = ppr
         self.calculate_delay()
+
+        # thought: do I want to allow a rotary encoder? probably. This would be the ultimate goal for an exhibit.
+        # may have to restructure code allow for gpio input and interruption. A start-stop switch or button would be nice too.
+        # maybe switch for direction, and button for start/stop
+        # small OLED display for displaying feed rate, the scale mass, and maybe the status of various things?
+        # could also have some regular color LEDs for feedback.
+
+    def cleanup(self):
+        gpio.cleanup()
 
     def calculate_delay(self):
         # rps is angular velocity in hertz, so rotations per second
@@ -98,3 +107,4 @@ if __name__=="__main__":
     f = Feeder(rps=0.24)
 
     f.go_finite(dur=3, direction='cw')
+    f.cleanup()
