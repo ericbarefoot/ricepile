@@ -7,16 +7,16 @@ import os
 
 class Feeder(object):
 
-	def __init__(self, feed_rate=None, calib_file=None, rps=None, ppr=800, PUL=17, DIR=27, ENA=22):
+    def __init__(self, feed_rate=None, calib_file=None, rps=None, ppr=800, PUL=17, DIR=27, ENA=22):
 
         self.PUL = PUL
         self.DIR = DIR
         self.ENA = ENA
 
         gpio.setmode(gpio.BCM)
-		gpio.setup(self.PUL, gpio.OUT)
-		gpio.setup(self.DIR, gpio.OUT)
-		gpio.setup(self.ENA, gpio.OUT)
+        gpio.setup(self.PUL, gpio.OUT)
+        gpio.setup(self.DIR, gpio.OUT)
+        gpio.setup(self.ENA, gpio.OUT)
 
         ################################
         # TODO: in this block, specify a calibration file that links rps to feed rate of rice.
@@ -24,7 +24,7 @@ class Feeder(object):
 
         ################################
 
-		# need to do rev per pulse math to make this easier
+        # need to do rev per pulse math to make this easier
         # whatever motor you have, there will be some pulse-per-rev setting
         if not rps:
             raise ValueError("must specify rotation frequency")
@@ -55,7 +55,7 @@ class Feeder(object):
         else:
             raise ValueError("specify either duration to rotate or rotations to execute")
 
-	def enable(self, direction='cw'):
+    def enable(self, direction='cw'):
         gpio.output(self.ENA, gpio.HIGH)
         sleep(25e-6)
         if direction == 'cw':
@@ -68,7 +68,7 @@ class Feeder(object):
             raise ValueError("what direction do you want to go anyway? there's only two options")
 
     def cw(self):
-		gpio.output(self.DIR, gpio.LOW)
+        gpio.output(self.DIR, gpio.LOW)
 
     def ccw(self):
         gpio.output(self.DIR, gpio.HIGH)
@@ -91,19 +91,19 @@ class Feeder(object):
 
 class Balance(object):
 
-	def __init__(self, dev=None, br=19200):
+    def __init__(self, dev=None, br=19200):
         if not dev:
             raise ValueError("specify path to serial device.")
-		self.ser = serial.Serial(dev, baudrate=br)
-		self.logging=False
+        self.ser = serial.Serial(dev, baudrate=br)
+        self.logging=False
 
-	def start_logging(self):
-		self.logging = True
-		while self.logging:
-			self.ser.read()
+    def start_logging(self):
+        self.logging = True
+        while self.logging:
+            self.ser.read()
 
 if __name__=="__main__":
-	# cam = Camera()
+    # cam = Camera()
     f = Feeder(rps=0.24)
 
     f.go_finite(dur=3, direction='cw')
