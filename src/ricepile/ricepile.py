@@ -1,19 +1,22 @@
 from picamzero import Camera
 import serial
 import RPi.GPIO as gpio
+import datetime
 
 from time import sleep
 import os
 
+gpio.setmode(gpio.BCM)
+
+
 class Feeder(object):
 
-    def __init__(self, feed_rate=None, calib_file=None, rps=None, ppr=800, PUL=17, DIR=27, ENA=22):
+    def __init__(self, feed_rate=None, calib_file=None, rps=None, ppr=1600, PUL=17, DIR=27, ENA=22):
 
         self.PUL = PUL
         self.DIR = DIR
         self.ENA = ENA
 
-        gpio.setmode(gpio.BCM)
         gpio.setup(self.PUL, gpio.OUT)
         gpio.setup(self.DIR, gpio.OUT)
         gpio.setup(self.ENA, gpio.OUT)
@@ -45,17 +48,18 @@ class Feeder(object):
         # rps is angular velocity in hertz, so rotations per second
         # ppr is pulses per rotation as set on motor
         # want seconds per pulse
-        self.pulse_delay = 1/(self.rps * self.ppr)
+        self.pulse_delay = 1/(self.rps * self.ppr * 2)
 
-    def calculate_pulses(self, dur, rot):
+    def calculate_pulses(self, dur=None, rot=None):
         if dur:
-            self.pulses = dur / self.pulse_delay
+            self.pulses = int(dur / self.pulse_delay / 2)
         elif rot:
-            self.pulses = self.ppr / rot
+            self.pulses = int(self.ppr * rot)
         else:
             raise ValueError("specify either duration to rotate or rotations to execute")
 
     def enable(self, direction='cw'):
+        self.enabled = True
         gpio.output(self.ENA, gpio.HIGH)
         sleep(25e-6)
         if direction == 'cw':
@@ -67,13 +71,18 @@ class Feeder(object):
         else:
             raise ValueError("what direction do you want to go anyway? there's only two options")
 
+    def disable(self):
+        gpio.output(self.ENA, gpio.LOW)
+        sleep(25e-6)
+        self.enabled = False
+
     def cw(self):
         gpio.output(self.DIR, gpio.LOW)
 
     def ccw(self):
         gpio.output(self.DIR, gpio.HIGH)
 
-    def go_finite(self, dur=5, direction="cw", rot=None, rps=None):
+    def go_finite(self, dur=None, rot=None, direction="cw", rps=None):
         if dur:
             self.calculate_pulses(dur = dur)
         elif rot:
@@ -84,10 +93,12 @@ class Feeder(object):
         self.enable(direction=direction)
 
         for p in range(self.pulses):
+            sleep(self.pulse_delay)
             gpio.output(self.PUL, gpio.HIGH)
             sleep(self.pulse_delay)
             gpio.output(self.PUL, gpio.LOW)
-            sleep(self.pulse_delay)
+
+        self.disable()
 
 class Balance(object):
 
