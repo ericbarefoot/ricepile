@@ -102,20 +102,64 @@ class Feeder(object):
 
 class Balance(object):
 
-    def __init__(self, dev=None, br=19200):
+    # example parameters needed for MJ's scale.
+    # s = serial.Serial('/dev/ttyUSB1', baudrate=1200, parity=serial.PARITY_ODD, stopbits=serial.STOPBITS_ONE, bytesize=serial.SEVENBITS)
+
+    def __init__(self, dev=None, file=None, **scaleargs):
         if not dev:
             raise ValueError("specify path to serial device.")
-        self.ser = serial.Serial(dev, baudrate=br)
+        self.ser = serial.Serial(dev, **scaleargs)
         self.logging=False
+        self.file = file
+        if not os.path.exists(os.path.dirname(self.file)):
+            raise ValueError('path to file directory does not exist')
+        if os.path.isfile(self.file):
+            self.dataexists = True
+            #######
+            # complementary stand-in segment to check-still-logging()
+            with open(self.file, 'r') as f:
+                self.datalines = len(f.readlines())
+            #######
+        elif os.path.basename(self.file) == "":
+            raise ValueError("must provide valid file path")
+        else:
+            with open(self.file, "a") as f:
+                _ = f.write("datetime, mass")
+                self.datalines = 0
+
+    def check_still_logging(self, thresh=100):
+        # This is a stand-in for some other method of halting data collection via input.
+        if self.datalines > thresh:
+            self.logging = False
+        self.datalines += 1
+
+    def stop_logging(self):
+        self.logging = False
 
     def start_logging(self):
         self.logging = True
-        while self.logging:
-            self.ser.read()
+        self.ser.reset_input_buffer()
+        with open('massdata.txt', 'w+') as f:
+            buffer = ''
+            buffer += self.ser.read().decode()
+            while '\n' not in buffer:
+                buffer += s.read().decode()
+            while self.logging:
+                w = self.ser.read_until().decode()
+                _ = f.write(datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S.%f") + ', ' + w[7:17] + '\n')
+                self.check_still_logging()
 
 if __name__=="__main__":
+
     # cam = Camera()
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+    mjscale = {"baudrate":1200, "parity":"serial.PARITY_ODD", "stopbits":"serial.STOPBITS_ONE", "bytesize":"serial.SEVENBITS"}
+
     f = Feeder(rps=0.24)
+
+    b = Balance(dev="/dev/ttyUSB1", file=os.path.expanduser(f"~/Desktop/{today}_data.csv"), **mjscale)
+
+    b.start_logging()
 
     f.go_finite(dur=3, direction='cw')
     f.cleanup()
