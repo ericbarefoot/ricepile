@@ -3,7 +3,11 @@ import serial
 import RPi.GPIO as gpio
 import datetime
 
-from time import sleep
+# attempting this first as a way to run the scale and feeder simultaneously. A better solution will use a microcontroller for both. 
+from multiprocessing import Process, Pipe
+
+from time import sleep, monotonic
+from tempfile import NamedTemporaryFile
 import os
 
 gpio.setmode(gpio.BCM)
@@ -34,6 +38,8 @@ class Feeder(object):
         self.rps = rps
         self.ppr = ppr
         self.calculate_delay()
+
+        self.running = False
 
         # thought: do I want to allow a rotary encoder? probably. This would be the ultimate goal for an exhibit.
         # may have to restructure code allow for gpio input and interruption. A start-stop switch or button would be nice too.
@@ -82,7 +88,7 @@ class Feeder(object):
     def ccw(self):
         gpio.output(self.DIR, gpio.HIGH)
 
-    def go_finite(self, dur=None, rot=None, direction="cw", rps=None):
+    def go_finite(self, dur=None, rot=None, direction="cw", rps=None, pipe=None):
         if dur:
             self.calculate_pulses(dur = dur)
         elif rot:
@@ -92,6 +98,12 @@ class Feeder(object):
 
         self.enable(direction=direction)
 
+        self.running = True
+
+        self.running_file = NamedTemporaryFile()
+
+        # pipe.send(self.running)
+
         for p in range(self.pulses):
             sleep(self.pulse_delay)
             gpio.output(self.PUL, gpio.HIGH)
@@ -99,6 +111,7 @@ class Feeder(object):
             gpio.output(self.PUL, gpio.LOW)
 
         self.disable()
+        self.running_file.close()
 
 class Balance(object):
 
@@ -109,7 +122,6 @@ class Balance(object):
         if not dev:
             raise ValueError("specify path to serial device.")
         self.ser = serial.Serial(dev, **scaleargs)
-        self.logging=False
         self.file = file
         if not os.path.exists(os.path.dirname(self.file)):
             raise ValueError('path to file directory does not exist')
@@ -126,28 +138,34 @@ class Balance(object):
             with open(self.file, "a") as f:
                 _ = f.write("datetime, mass")
                 self.datalines = 0
+        self.ser.close()
 
-    def check_still_logging(self, thresh=100):
-        # This is a stand-in for some other method of halting data collection via input.
-        if self.datalines > thresh:
-            self.logging = False
-        self.datalines += 1
+    # def check_still_logging(self, thresh=100):
+    #     # This is a stand-in for some other method of halting data collection via input.
+    #     if self.datalines > thresh:
+    #         self.logging = False
+    #     self.datalines += 1
 
-    def stop_logging(self):
-        self.logging = False
+    # def stop_logging(self):
+    #     self.logging = False
 
-    def start_logging(self):
-        self.logging = True
+    def log_data(self):
+        # self.logging = True
+        self.ser.open()
         self.ser.reset_input_buffer()
         with open('massdata.txt', 'w+') as f:
             buffer = ''
             buffer += self.ser.read().decode()
             while '\n' not in buffer:
                 buffer += s.read().decode()
-            while self.logging:
-                w = self.ser.read_until().decode()
-                _ = f.write(datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S.%f") + ', ' + w[7:17] + '\n')
-                self.check_still_logging()
+            w = self.ser.read_until().decode()
+            _ = f.write(datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S.%f") + ', ' + w[7:17] + '\n')
+        self.ser.close()
+
+def Pile(object):
+    def __init__(self):
+        pass
+
 
 if __name__=="__main__":
 
@@ -159,7 +177,14 @@ if __name__=="__main__":
 
     b = Balance(dev="/dev/ttyUSB1", file=os.path.expanduser(f"~/Desktop/{today}_data.csv"), **mjscale)
 
-    b.start_logging()
+    starttime = monotonic()
+    fp = Process(target=f.go_finite, kwargs={'dur':30})
+    fp.start()
 
-    f.go_finite(dur=3, direction='cw')
+    while os.path.exists(f.running_file):
+        b.log_data()
+        sleep(2.0 - (monotonic() - starttime) % 2.0)
+
+    fp.join()
+
     f.cleanup()
