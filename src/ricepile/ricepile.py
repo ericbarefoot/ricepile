@@ -136,7 +136,7 @@ class Balance(object):
             raise ValueError("must provide valid file path")
         else:
             with open(self.file, "a") as f:
-                _ = f.write("datetime, mass")
+                _ = f.write("datetime, mass\n")
                 self.datalines = 0
         self.ser.close()
 
@@ -153,11 +153,11 @@ class Balance(object):
         # self.logging = True
         self.ser.open()
         self.ser.reset_input_buffer()
-        with open('massdata.txt', 'w+') as f:
+        with open(self.file, 'a') as f:
             buffer = ''
             buffer += self.ser.read().decode()
             while '\n' not in buffer:
-                buffer += s.read().decode()
+                buffer += self.ser.read().decode()
             w = self.ser.read_until().decode()
             _ = f.write(datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S.%f") + ', ' + w[7:17] + '\n')
         self.ser.close()
@@ -171,11 +171,11 @@ if __name__=="__main__":
 
     # cam = Camera()
     today = datetime.datetime.now().strftime("%Y-%m-%d")
-    mjscale = {"baudrate":1200, "parity":"serial.PARITY_ODD", "stopbits":"serial.STOPBITS_ONE", "bytesize":"serial.SEVENBITS"}
+    mjscale = {"baudrate":19200, "parity":serial.PARITY_ODD, "stopbits":serial.STOPBITS_ONE, "bytesize":serial.SEVENBITS}
 
     f = Feeder(rps=0.24)
 
-    b = Balance(dev="/dev/ttyUSB1", file=os.path.expanduser(f"~/Desktop/{today}_data.csv"), **mjscale)
+    b = Balance(dev="/dev/ttyUSB0", file=os.path.expanduser(f"~/Desktop/{today}_data.csv"), **mjscale)
 
     starttime = monotonic()
     fp = Process(target=f.go_finite, kwargs={'dur':30})
