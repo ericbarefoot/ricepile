@@ -34,7 +34,9 @@ class Feeder:
         ppr=1600,
         PUL=17,
         DIR=27,
-        ENA=22
+        ENA=22,
+        encoder_a=5,
+        encoder_b=6
     ):
         """Initialize the Feeder with motor control parameters.
         
@@ -46,14 +48,20 @@ class Feeder:
             PUL (int, optional): GPIO pin for pulse signal. Defaults to 17
             DIR (int, optional): GPIO pin for direction signal. Defaults to 27
             ENA (int, optional): GPIO pin for enable signal. Defaults to 22
+            encoder_a (int, optional): GPIO pin for encoder A. Defaults to 5
+            encoder_b (int, optional): GPIO pin for encoder B. Defaults to 6
         """
         self.PUL = PUL
         self.DIR = DIR
         self.ENA = ENA
+        self.encoder_a = encoder_a
+        self.encoder_b = encoder_b
 
         gpio.setup(self.PUL, gpio.OUT)
         gpio.setup(self.DIR, gpio.OUT)
         gpio.setup(self.ENA, gpio.OUT)
+        gpio.setup(self.encoder_a, gpio.IN, pull_up_down=gpio.PUD_UP)
+        gpio.setup(self.encoder_b, gpio.IN, pull_up_down=gpio.PUD_UP)
 
         ################################
         # TODO: in this block, specify a calibration file that links rps to feed rate of rice.
@@ -70,6 +78,7 @@ class Feeder:
         self.calculate_delay()
 
         self.running = False
+        self.last_encoder_value = 0
 
         # thought: do I want to allow a rotary encoder? probably. This would be the 
         # ultimate goal for an exhibit.
@@ -156,6 +165,14 @@ class Feeder:
         self.disable()
         self.running_file.close()
 
+    def read_encoder(self):
+        """Read the rotary encoder value and update the rps."""
+        current_value = gpio.input(self.encoder_a)  # Read the encoder value
+        if current_value != self.last_encoder_value:
+            # Update rps based on encoder value
+            self.rps = self.calculate_rps_from_encoder()  # Implement this method based on your encoder logic
+        self.last_encoder_value = current_value
+
     def go_infinite(self, rps=None, direction="cw"):
         """Run the motor continuously until stopped.
         
@@ -167,7 +184,8 @@ class Feeder:
         self.calculate_delay()
 
         while os.path.exists(self.running_file):
-            pass
+            self.read_encoder()  # Continuously read the encoder value
+            sleep(0.1)  # Adjust the sleep time as necessary
 
         self.stop()
 
@@ -193,11 +211,9 @@ class Feeder:
 
         self.start()
 
-        for p in range(self.pulses):
-            sleep(self.pulse_delay)
-            gpio.output(self.PUL, gpio.HIGH)
-            sleep(self.pulse_delay)
-            gpio.output(self.PUL, gpio.LOW)
+        while os.path.exists(self.running_file):
+            self.read_encoder()  # Continuously read the encoder value
+            sleep(0.1)  # Adjust the sleep time as necessary
 
         self.stop()
 
