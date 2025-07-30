@@ -6,6 +6,7 @@ motor feeder and digital scale interface.
 
 import datetime
 import os
+import re
 from multiprocessing import Process, Pipe
 from tempfile import NamedTemporaryFile
 from time import sleep, monotonic
@@ -173,6 +174,9 @@ class Feeder:
             self.rps = self.calculate_rps_from_encoder()  # Implement this method based on your encoder logic
         self.last_encoder_value = current_value
 
+    def calculate_rps_from_encoder(self):
+        return self.rps
+
     def go_infinite(self, rps=None, direction="cw"):
         """Run the motor continuously until stopped.
         
@@ -183,7 +187,7 @@ class Feeder:
         self.start()
         self.calculate_delay()
 
-        while os.path.exists(self.running_file):
+        while os.path.exists(self.running_file.name):
             self.read_encoder()  # Continuously read the encoder value
             sleep(0.1)  # Adjust the sleep time as necessary
 
@@ -209,13 +213,23 @@ class Feeder:
         else:
             raise ValueError("specify a finite number of rotations")
 
+        #self.enable(direction=direction)
         self.start()
 
-        while os.path.exists(self.running_file):
-            self.read_encoder()  # Continuously read the encoder value
-            sleep(0.1)  # Adjust the sleep time as necessary
+        #for p in self.pulses:
+        for p in range(self.pulses):
+            sleep(self.pulse_delay)
+            gpio.output(self.PUL, gpio.HIGH)
+            sleep(self.pulse_delay)
+            gpio.output(self.PUL, gpio.LOW)
+            #sleep(self.pulse_delay)
+
+        #while os.path.exists(self.running_file.name):
+        #    self.read_encoder()  # Continuously read the encoder value
+        #    sleep(0.1)  # Adjust the sleep time as necessary
 
         self.stop()
+        #self.disable()
 
     def calibrate(self, balance, rps_list, dur, output_file, sample_interval=0.5):
         """Run calibration sequence varying RPS values and record mass data to create a calibration file."""
@@ -320,13 +334,13 @@ class Balance:
             buffer += self.ser.read().decode()
         w = self.ser.read_until().decode()
         self.ser.close()
+        ww = re.findall(r"\d+\.\d+", w)
         try:
-            return float(w[7:17])
+            return float(ww[0])
+        #try:
+        #    return float(ww.strip())
         except ValueError:
-            try:
-                return float(w.strip())
-            except ValueError:
-                return 0.0
+            return 0.0
 
 
 class Pile:
