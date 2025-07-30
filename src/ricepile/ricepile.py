@@ -18,6 +18,29 @@ from picamzero import Camera
 # Set GPIO mode
 gpio.setmode(gpio.BCM)
 
+class riceCamera:
+    """A class to control the camera for capturing images of the rice pile.
+    
+    This class uses the picamzero library to interface with a Raspberry Pi camera.
+    It provides methods to capture images and manage camera settings.
+    """
+
+    def __init__(self):
+        """Initialize the riceCamera."""
+        self.camera = Camera()
+        self.camera.start_preview()
+
+    def capture_image(self, filename):
+        """Capture an image and save it to the specified filename.
+        
+        Args:
+            filename (str): The path where the image will be saved.
+        """
+        self.camera.capture(filename)
+        
+    def stop_preview(self):
+        """Stop the camera preview."""
+        self.camera.stop_preview()
 
 class Feeder:
     """A class to control a stepper motor for feeding rice at a specified rate.
