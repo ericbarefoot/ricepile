@@ -11,12 +11,17 @@ from multiprocessing import Process, Pipe
 from tempfile import NamedTemporaryFile
 from time import sleep, monotonic
 
-import RPi.GPIO as gpio
-import serial
-from picamzero import Camera
+# from distutils.util import strtobool
 
-# Set GPIO mode
-gpio.setmode(gpio.BCM)
+import serial
+from picamzero import Camera # type: ignore
+
+def str2bool(v):
+  return v.lower() in ("yes", "true", "t", "1")
+
+# import RPi.GPIO as gpio
+# # Set GPIO mode
+# gpio.setmode(gpio.BCM)
 
 class riceCamera:
     """A class to control the camera for capturing images of the rice pile.
@@ -37,7 +42,7 @@ class riceCamera:
             filename (str): The path where the image will be saved.
         """
         self.camera.capture(filename)
-        
+
     def stop_preview(self):
         """Stop the camera preview."""
         self.camera.stop_preview()
@@ -52,41 +57,32 @@ class Feeder:
 
     def __init__(
         self,
+        port="/dev/ttyACM1",  # Serial port for the stepper motor controller
+        dataport="/dev/ttyACM2",  # Serial port for the stepper motor controller
         feed_rate=None,
         calib_file=None,
-        rps=None,
-        ppr=1600,
-        PUL=17,
-        DIR=27,
-        ENA=22,
-        encoder_a=5,
-        encoder_b=6
+        rps=0.5,  # Default rotations per second
+        ppr=1600, # Pulses per revolution, adjust based on your motor and driver
+        # dont have a good way to specify this yet, so this does nothing for now.
     ):
         """Initialize the Feeder with motor control parameters.
         
         Args:
             feed_rate (float, optional): Target feed rate in units per second
             calib_file (str, optional): Path to calibration file linking rps to feed rate
-            rps (float): Rotations per second for the motor
-            ppr (int, optional): Pulses per revolution. Defaults to 1600
-            PUL (int, optional): GPIO pin for pulse signal. Defaults to 17
-            DIR (int, optional): GPIO pin for direction signal. Defaults to 27
-            ENA (int, optional): GPIO pin for enable signal. Defaults to 22
-            encoder_a (int, optional): GPIO pin for encoder A. Defaults to 5
-            encoder_b (int, optional): GPIO pin for encoder B. Defaults to 6
+            rps (float): Rotations per second for the motor, defaults to 0.5 Hz.
+            ppr (int, optional): Pulses per revolution. Defaults to 1600. Not implemented yet.
         """
-        self.PUL = PUL
-        self.DIR = DIR
-        self.ENA = ENA
-        self.encoder_a = encoder_a
-        self.encoder_b = encoder_b
 
-        gpio.setup(self.PUL, gpio.OUT)
-        gpio.setup(self.DIR, gpio.OUT)
-        gpio.setup(self.ENA, gpio.OUT)
-        gpio.setup(self.encoder_a, gpio.IN, pull_up_down=gpio.PUD_UP)
-        gpio.setup(self.encoder_b, gpio.IN, pull_up_down=gpio.PUD_UP)
+        self.fp = serial.Serial(port)
+        self.dp = serial.Serial(dataport)
 
+        self.fp.write(b'\x03')
+        sleep(2)  # Wait for the controller to exit
+        self.fp.write(b'\x04')
+        sleep(4)  # Wait for the controller to reboot
+
+        self.calib_file = calib_file
         ################################
         # TODO: in this block, specify a calibration file that links rps to feed rate of rice.
 
@@ -95,14 +91,18 @@ class Feeder:
 
         # need to do rev per pulse math to make this easier
         # whatever motor you have, there will be some pulse-per-rev setting
-        if not rps:
-            raise ValueError("must specify rotation frequency")
         self.rps = rps
         self.ppr = ppr
-        self.calculate_delay()
 
-        self.running = False
-        self.last_encoder_value = 0
+        # use get statemem
+
+        self.running = str2bool(self.get('running'))
+        #  self.fp.write('get:running'.encode)self.dp.
+        self.enabled = False
+        self.direction = -1  # Default direction
+        self.dirconv = lambda x: "CW" if x<0 else "CCW" if x>0 else "Problem..."
+
+        # self.last_encoder_value = 0
 
         # thought: do I want to allow a rotary encoder? probably. This would be the 
         # ultimate goal for an exhibit.
@@ -113,146 +113,86 @@ class Feeder:
         # the status of various things?
         # could also have some regular color LEDs for feedback.
 
-    def cleanup(self):
-        """Clean up GPIO resources when done with the feeder."""
-        gpio.cleanup()
-
-    def calculate_delay(self):
-        """Calculate the delay between pulses based on desired rotation speed.
-        
-        The delay is calculated as: 1 / (rps * ppr * 2)
-        where rps is rotations per second and ppr is pulses per revolution.
-        """
-        self.pulse_delay = 1 / (self.rps * self.ppr * 2)
-
-    def calculate_pulses(self, dur=None, rot=None):
-        """Calculate the number of pulses needed for a given duration or rotation.
+    def get(self, statuscode):
+        """Send a command to the motor controller and return the response.
         
         Args:
-            dur (float, optional): Duration in seconds
-            rot (float, optional): Number of rotations
-            
-        Raises:
-            ValueError: If neither duration nor rotations are specified
+            command (str): The command to send to the motor controller.
+        
+        Returns:
+            str: The response from the motor controller.
         """
-        if dur:
-            self.pulses = int(dur / self.pulse_delay / 2)
-        elif rot:
-            self.pulses = int(self.ppr * rot)
-        else:
-            raise ValueError("specify either duration to rotate or rotations to execute")
-
-    def enable(self, direction='cw'):
-        """Enable the motor and set its direction.
+        self.fp.write(f"get:{statuscode}\n".encode())
+        return self.dp.readline().decode().strip()
+    
+    def speed(self, value):
+        """Send a command to the motor controller and return the response.
         
         Args:
-            direction (str, optional): Direction of rotation ('cw' or 'ccw'). Defaults to 'cw'
-            
-        Raises:
-            ValueError: If direction is not 'cw' or 'ccw'
+            command (str): The command to send to the motor controller.
+        
+        Returns:
+            str: The response from the motor controller.
+        """
+        self.fp.write(f"speed={value}\n".encode())
+        # return self.dp.readline().decode().strip()
+
+    def enable(self):
+        """Enable the motor.
         """
         self.enabled = True
-        gpio.output(self.ENA, gpio.HIGH)
-        sleep(25e-6)
-        
-        if direction == 'cw':
-            self.cw()
-            sleep(125e-6)
-        elif direction == 'ccw':
-            self.ccw()
-            sleep(125e-6)
-        else:
-            raise ValueError("direction must be either 'cw' or 'ccw'")
+        self.fp.write("enable\n".encode())
 
     def disable(self):
         """Disable the motor by setting the enable pin low."""
-        gpio.output(self.ENA, gpio.LOW)
-        sleep(25e-6)
         self.enabled = False
-
-    def cw(self):
-        """Set motor direction to clockwise."""
-        gpio.output(self.DIR, gpio.LOW)
-
-    def ccw(self):
-        """Set motor direction to counter-clockwise."""
-        gpio.output(self.DIR, gpio.HIGH)
+        self.fp.write("disable\n".encode())
+    
+    def change_direction(self):
+        self.fp.write("switch_direction\n".encode())
+        self.direction *= -1  # Toggle direction
+    
+    def get_direction(self):
+        """Get the current direction of the motor.
+        
+        Returns:
+            str: "CW" for clockwise, "CCW" for counter-clockwise, or an error message.
+        """
+        return self.dirconv(self.direction)
 
     def start(self):
-        """Start the motor and create a running state file."""
-        self.enable(direction='cw')  # Fixed undefined direction variable
-        self.running = True
-        self.running_file = NamedTemporaryFile()
+        """Start the motor, even if disabled."""
+        self.enable()
+        if not self.running: 
+            self.fp.write('toggle\n'.encode())
+            self.running = str2bool(self.get('running'))
+        else:
+            pass  # already running, do nothing
+
+    def toggle(self):
+        """Toggle motor on-off."""
+        self.fp.write('toggle\n'.encode())
+        self.running = str2bool(self.get('running'))
 
     def stop(self):
-        """Stop the motor and clean up the running state file."""
+        """Stop the motor and disable it."""
         self.disable()
-        self.running_file.close()
+        self.fp.write("stop\n".encode())
 
-    def read_encoder(self):
-        """Read the rotary encoder value and update the rps."""
-        current_value = gpio.input(self.encoder_a)  # Read the encoder value
-        if current_value != self.last_encoder_value:
-            # Update rps based on encoder value
-            self.rps = self.calculate_rps_from_encoder()  # Implement this method based on your encoder logic
-        self.last_encoder_value = current_value
+    def reboot_controller(self):
+        """Reboot the motor controller."""
+        self.fp.write(b'\x03')
+        sleep(2)  # Wait for the controller to exit
+        self.fp.write(b'\x04')
+        sleep(4)  # Wait for the controller to reboot
 
-    def calculate_rps_from_encoder(self):
-        return self.rps
-
-    def go_infinite(self, rps=None, direction="cw"):
-        """Run the motor continuously until stopped.
-        
-        Args:
-            rps (float, optional): Rotations per second
-            direction (str, optional): Direction of rotation. Defaults to "cw"
-        """
-        self.start()
-        self.calculate_delay()
-
-        while os.path.exists(self.running_file.name):
-            self.read_encoder()  # Continuously read the encoder value
-            sleep(0.1)  # Adjust the sleep time as necessary
-
-        self.stop()
-
-    def go_finite(self, dur=None, rot=None, direction="cw", rps=None, pipe=None):
-        """Run the motor for a specific duration or number of rotations.
-        
-        Args:
-            dur (float, optional): Duration in seconds
-            rot (float, optional): Number of rotations
-            direction (str, optional): Direction of rotation. Defaults to "cw"
-            rps (float, optional): Rotations per second
-            pipe (multiprocessing.Pipe, optional): Pipe for inter-process communication
-            
-        Raises:
-            ValueError: If neither duration nor rotations are specified
-        """
-        if dur:
-            self.calculate_pulses(dur=dur)
-        elif rot:
-            self.calculate_pulses(rot=rot)
-        else:
-            raise ValueError("specify a finite number of rotations")
-
-        #self.enable(direction=direction)
-        self.start()
-
-        #for p in self.pulses:
-        for p in range(self.pulses):
-            sleep(self.pulse_delay)
-            gpio.output(self.PUL, gpio.HIGH)
-            sleep(self.pulse_delay)
-            gpio.output(self.PUL, gpio.LOW)
-            #sleep(self.pulse_delay)
-
-        #while os.path.exists(self.running_file.name):
-        #    self.read_encoder()  # Continuously read the encoder value
-        #    sleep(0.1)  # Adjust the sleep time as necessary
-
-        self.stop()
-        #self.disable()
+    # def read_encoder(self):
+    #     """Read the rotary encoder value and update the rps."""
+    #     current_value = gpio.input(self.encoder_a)  # Read the encoder value
+    #     if current_value != self.last_encoder_value:
+    #         # Update rps based on encoder value
+    #         self.rps = self.calculate_rps_from_encoder()  # Implement this method based on your encoder logic
+    #     self.last_encoder_value = current_value
 
     def calibrate(self, balance, rps_list, dur, output_file, sample_interval=0.5):
         """Run calibration sequence varying RPS values and record mass data to create a calibration file."""
@@ -260,9 +200,8 @@ class Feeder:
         with open(output_file, 'w') as f:
             f.write('rps,total_mass,feed_rate\n')
             for rps in rps_list:
-                self.rps = rps
-                self.calculate_delay()
-                process = Process(target=self.go_finite, kwargs={'dur': dur})
+                self.speed(rps)
+                process = Process(target=self, kwargs={'dur': dur})
                 process.start()
                 total_mass = 0.0
                 # sample mass until feeder process completes
@@ -289,7 +228,7 @@ class Balance:
     # s = serial.Serial('/dev/ttyUSB1', baudrate=1200, parity=serial.PARITY_ODD, 
     # stopbits=serial.STOPBITS_ONE, bytesize=serial.SEVENBITS)
 
-    def __init__(self, dev=None, file=None, **scaleargs):
+    def __init__(self, dev=None, file='', **scaleargs):
         """Initialize the Balance with serial device and logging parameters.
         
         Args:
