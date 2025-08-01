@@ -14,7 +14,7 @@ from time import sleep, monotonic
 # from distutils.util import strtobool
 
 import serial
-from picamzero import Camera # type: ignore
+# from picamzero import Camera # type: ignore
 
 def str2bool(v):
   return v.lower() in ("yes", "true", "t", "1")
@@ -23,29 +23,29 @@ def str2bool(v):
 # # Set GPIO mode
 # gpio.setmode(gpio.BCM)
 
-class riceCamera:
-    """A class to control the camera for capturing images of the rice pile.
+# class riceCamera:
+#     """A class to control the camera for capturing images of the rice pile.
     
-    This class uses the picamzero library to interface with a Raspberry Pi camera.
-    It provides methods to capture images and manage camera settings.
-    """
+#     This class uses the picamzero library to interface with a Raspberry Pi camera.
+#     It provides methods to capture images and manage camera settings.
+#     """
 
-    def __init__(self):
-        """Initialize the riceCamera."""
-        self.camera = Camera()
-        self.camera.start_preview()
+#     def __init__(self):
+#         """Initialize the riceCamera."""
+#         self.camera = Camera()
+#         self.camera.start_preview()
 
-    def capture_image(self, filename):
-        """Capture an image and save it to the specified filename.
+#     def capture_image(self, filename):
+#         """Capture an image and save it to the specified filename.
         
-        Args:
-            filename (str): The path where the image will be saved.
-        """
-        self.camera.capture(filename)
+#         Args:
+#             filename (str): The path where the image will be saved.
+#         """
+#         self.camera.capture(filename)
 
-    def stop_preview(self):
-        """Stop the camera preview."""
-        self.camera.stop_preview()
+#     def stop_preview(self):
+#         """Stop the camera preview."""
+#         self.camera.stop_preview()
 
 class Feeder:
     """A class to control a stepper motor for feeding rice at a specified rate.
@@ -164,7 +164,7 @@ class Feeder:
         """Start the motor, even if disabled."""
         self.enable()
         if not self.running: 
-            self.fp.write('toggle\n'.encode())
+            self.toggle()
             self.running = str2bool(self.get('running'))
         else:
             pass  # already running, do nothing
@@ -194,27 +194,35 @@ class Feeder:
     #         self.rps = self.calculate_rps_from_encoder()  # Implement this method based on your encoder logic
     #     self.last_encoder_value = current_value
 
-    def calibrate(self, balance, rps_list, dur, output_file, sample_interval=0.5):
+    def calibrate(self, balance, rps_list, output_file, time_inc=30, mass_inc=50, sample_interval=0.5):
         """Run calibration sequence varying RPS values and record mass data to create a calibration file."""
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         with open(output_file, 'w') as f:
             f.write('rps,total_mass,feed_rate\n')
             for rps in rps_list:
+                # process = Process(target=self, kwargs={'dur': dur})
+                # process.start()
+                start_mass = balance.read_mass()
+                mass_diff = 0
                 self.speed(rps)
-                process = Process(target=self, kwargs={'dur': dur})
-                process.start()
-                total_mass = 0.0
+                self.start()
+                starttime = monotonic()
+                print(f'Starting calibration at {rps} RPS, starting mass: {start_mass}')
                 # sample mass until feeder process completes
-                while process.is_alive():
+                while (monotonic() - starttime) < time_inc:  # Run for 30 seconds
+                # while mass_diff < mass_inc:
                     try:
-                        mass = balance.read_mass()
-                        total_mass += mass
+                        mass_diff = balance.read_mass() - start_mass
                     except Exception:
                         pass
                     sleep(sample_interval)
-                process.join()
-                feed_rate = total_mass / dur if dur else 0
-                f.write(f'{rps},{total_mass},{feed_rate}\n')
+                # process.join()
+                self.toggle()
+                dur = monotonic() - starttime
+                # calculate feed rate
+                feed_rate = mass_diff / dur if dur else 0
+                f.write(f'{rps},{mass_diff},{feed_rate}\n')
+        
 
 
 class Balance:
@@ -321,25 +329,18 @@ if __name__ == "__main__":
 
     # cam = Camera()
     today = datetime.datetime.now().strftime("%Y-%m-%d")
-    mjscale = {
-        "baudrate": 19200,
-        "parity": serial.PARITY_ODD,
-        "stopbits": serial.STOPBITS_ONE,
-        "bytesize": serial.SEVENBITS
-    }
-
-    f = Feeder(rps=0.24)
-
-    b = Balance(dev="/dev/ttyUSB0", file=os.path.expanduser(f"~/Desktop/{today}_data.csv"), **mjscale)
-
     starttime = monotonic()
-    fp = Process(target=f.go_finite, kwargs={'dur': 30})
-    fp.start()
 
-    while os.path.exists(f.running_file):
+    f = Feeder()
+
+    b = Balance(dev="/dev/ttyUSB0", file=os.path.expanduser(f"~/Desktop/{today}_data.csv"))
+
+    f.start()
+
+    while f.running:
         b.log_data()
         sleep(0.5 - (monotonic() - starttime) % 0.5)
 
-    fp.join()
+    # fp.join()
 
-    f.cleanup()
+    # f.cleanup()
